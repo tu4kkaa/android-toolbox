@@ -11,18 +11,30 @@ private val Context.dataStore by preferencesDataStore(name = "toolbox_prefs")
 
 class DataStoreManager(private val context: Context) {
     companion object {
-        val LEVEL_OFFSET = doublePreferencesKey("level_offset")
+        private val LEVEL_OFFSET_EDGE = doublePreferencesKey("level_offset_edge")
+        private val LEVEL_OFFSET_FLAT = doublePreferencesKey("level_offset_flat")
         val SOUND_CALIB = doublePreferencesKey("sound_calib")
     }
 
-    suspend fun saveLevelOffset(offset: Double) {
+    suspend fun saveLevelOffsetEdge(offset: Double) {
         context.dataStore.edit { prefs ->
-            prefs[LEVEL_OFFSET] = offset
+            prefs[LEVEL_OFFSET_EDGE] = offset
         }
     }
 
-    suspend fun getLevelOffset(): Double {
-        val flow = context.dataStore.data.map { prefs -> prefs[LEVEL_OFFSET] ?: 0.0 }
+    suspend fun getLevelOffsetEdge(): Double {
+        val flow = context.dataStore.data.map { prefs -> prefs[LEVEL_OFFSET_EDGE] ?: 0.0 }
+        return flow.first()
+    }
+
+    suspend fun saveLevelOffsetFlat(offset: Double) {
+        context.dataStore.edit { prefs ->
+            prefs[LEVEL_OFFSET_FLAT] = offset
+        }
+    }
+
+    suspend fun getLevelOffsetFlat(): Double {
+        val flow = context.dataStore.data.map { prefs -> prefs[LEVEL_OFFSET_FLAT] ?: 0.0 }
         return flow.first()
     }
 
