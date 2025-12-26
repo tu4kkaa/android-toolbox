@@ -4,16 +4,21 @@ package com.example.toolbox.screens
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -47,7 +52,7 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
     var selectedMode by remember { mutableStateOf(FlashMode.ON) }
     var isOn by remember { mutableStateOf(false) } // logical torch state
     var strobeFreq by remember { mutableStateOf(5) } // Hz
-    var brightness by remember { mutableStateOf(100) } // 0..100 - simulated via PWM
+    var brightness by remember { mutableStateOf(100) } // 1..100 - percent (try to map to real level if supported)
     val coroutine = rememberCoroutineScope()
     var job by remember { mutableStateOf<Job?>(null) }
 
@@ -56,6 +61,26 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
             cameraManager.setTorchMode(id, on)
         } catch (e: Exception) {
             Log.e("Flashlight", "setTorchMode error", e)
+        }
+    }
+
+    /**
+     * Try to set torch strength via CameraManager.setTorchStrengthLevel if available.
+     * Returns true if call was attempted successfully, false otherwise.
+     * Using reflection so project can compile with older SDK but still call on newer devices.
+     */
+    fun trySetTorchStrength(id: String, levelPercent: Int): Boolean {
+        val level = levelPercent.coerceIn(1, 100)
+        return try {
+            val clazz = CameraManager::class.java
+            val method = clazz.getMethod("setTorchStrengthLevel", String::class.java, Int::class.javaPrimitiveType)
+            method.invoke(cameraManager, id, level)
+            true
+        } catch (t: NoSuchMethodException) {
+            false
+        } catch (e: Exception) {
+            Log.w("Flashlight", "setTorchStrengthLevel failed: ${e.message}")
+            false
         }
     }
 
@@ -77,24 +102,17 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
 
         when (selectedMode) {
             FlashMode.ON -> {
-                // If brightness == 100 -> continuous ON, otherwise simulate PWM
-                if (brightness >= 100) {
+                // Try to use real platform brightness first (if available)
+                val realSupported = trySetTorchStrength(id, brightness)
+                if (realSupported) {
+                    // turn torch on (strength applied)
                     setTorch(id, true)
                     isOn = true
                 } else {
-                    // PWM simulation: short period -> duty cycle
-                    val periodMs = 50L
-                    job = coroutine.launch {
-                        isOn = true
-                        while (isActive) {
-                            val onMs = (periodMs * (brightness.coerceIn(1, 100)) / 100L)
-                            val offMs = (periodMs - onMs).coerceAtLeast(1L)
-                            setTorch(id, true)
-                            delay(onMs)
-                            setTorch(id, false)
-                            delay(offMs)
-                        }
-                    }
+                    // If real brightness not supported - do NOT emulate via blinking.
+                    // Just turn torch fully on regardless of brightness setting.
+                    setTorch(id, true)
+                    isOn = true
                 }
             }
 
@@ -176,8 +194,8 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Top) {
-        Text("Flashlight", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
+        Text("Flashlight", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(14.dp))
 
         // Mode selector: OutlinedTextField + DropdownMenu (stable API)
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -185,7 +203,8 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
                 value = modeLabel,
                 onValueChange = { /* read-only */ },
                 readOnly = true,
-                label = { Text("Mode") },
+                textStyle = LocalTextStyle.current.copy(fontSize = 18.sp),
+                label = { Text("Mode", fontSize = 16.sp) },
                 trailingIcon = {
                     IconButton(onClick = { expanded = !expanded }) {
                         Icon(Icons.Default.ArrowDropDown, contentDescription = "Open modes")
@@ -208,7 +227,8 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
                                     FlashMode.SOS -> "SOS"
                                     FlashMode.STROBE -> "Strobe"
                                     FlashMode.CANDLE -> "Candle"
-                                }
+                                },
+                                fontSize = 18.sp
                             )
                         },
                         onClick = {
@@ -224,41 +244,75 @@ fun FlashlightScreen(modifier: Modifier = Modifier) {
 
         // Controls that depend on mode
         if (selectedMode == FlashMode.STROBE) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { strobeFreq = (strobeFreq - 1).coerceAtLeast(1) }) { Text("-") }
-                Text("Freq: $strobeFreq Hz")
-                OutlinedButton(onClick = { strobeFreq = (strobeFreq + 1).coerceAtMost(30) }) { Text("+") }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { strobeFreq = (strobeFreq - 1).coerceAtLeast(1) }, modifier = Modifier.size(64.dp)) { Text("-", fontSize = 22.sp) }
+                Text("Freq: $strobeFreq Hz", fontSize = 20.sp)
+                OutlinedButton(onClick = { strobeFreq = (strobeFreq + 1).coerceAtMost(30) }, modifier = Modifier.size(64.dp)) { Text("+", fontSize = 22.sp) }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
         }
 
-        // Brightness control (simulated)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { brightness = (brightness - 10).coerceAtLeast(1) }) { Text("-") }
-            Text("Brightness: $brightness%")
-            OutlinedButton(onClick = { brightness = (brightness + 10).coerceAtMost(100) }) { Text("+") }
-        }
+        Spacer(Modifier.weight(1f)) // push the bottom controls to the bottom
 
-        Spacer(Modifier.height(12.dp))
+        // Bottom control: brightness - | (toggle) | + centered
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Decrease brightness
+            OutlinedButton(
+                onClick = {
+                    val newB = (brightness - 10).coerceAtLeast(1)
+                    brightness = newB
+                    // If torch supports real strength, try to apply immediately
+                    if (isOn && cameraIdWithFlash != null) {
+                        trySetTorchStrength(cameraIdWithFlash!!, brightness)
+                    }
+                },
+                modifier = Modifier.size(64.dp)
+            ) { Text("-", fontSize = 22.sp) }
 
-        // Single toggle button On/Off
-        Button(onClick = { toggleOnOff() }, modifier = Modifier.fillMaxWidth()) {
-            Text(if (isOn) "Turn Off" else "Turn On")
-        }
+            // Central circular toggle button with flashlight icon
+            if (isOn) {
+                Button(
+                    onClick = { toggleOnOff() },
+                    shape = MaterialTheme.shapes.small.copy(all = CornerSize(percent = 50)),
+                    modifier = Modifier.size(110.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(Icons.Default.FlashOn, contentDescription = "Turn off", modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        toggleOnOff()
+                    },
+                    shape = MaterialTheme.shapes.small.copy(all = CornerSize(percent = 50)),
+                    modifier = Modifier.size(110.dp),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(Icons.Default.FlashOn, contentDescription = "Turn on", modifier = Modifier.size(44.dp))
+                }
+            }
 
-        Spacer(Modifier.height(12.dp))
-
-        // Info
-        if (cameraIdWithFlash == null) {
-            Text("No camera flash detected on this device.", color = MaterialTheme.colorScheme.error)
-        } else {
-            Text("Mode: ${selectedMode.name}, Device flash available.")
+            // Increase brightness
+            OutlinedButton(
+                onClick = {
+                    val newB = (brightness + 10).coerceAtMost(100)
+                    brightness = newB
+                    // If torch supports real strength, try to apply immediately
+                    if (isOn && cameraIdWithFlash != null) {
+                        trySetTorchStrength(cameraIdWithFlash!!, brightness)
+                    }
+                },
+                modifier = Modifier.size(64.dp)
+            ) { Text("+", fontSize = 22.sp) }
         }
 
         Spacer(Modifier.height(8.dp))
-        Text(
-            "Note: true brightness control requires Camera2 capture APIs; current \"brightness\" is simulated by duty-cycle (may cause flicker).",
-            style = MaterialTheme.typography.bodySmall
-        )
+        // Removed Mode:... and Note:... texts as requested
     }
 }
