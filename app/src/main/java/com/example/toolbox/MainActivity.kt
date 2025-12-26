@@ -181,12 +181,12 @@ fun ToolboxApp() {
                     telemetryManager.saveRating(rating)
                     showRatingDialog = false
                 }) {
-                    Text("OK")
+                    Text("Оценить")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showRatingDialog = false }) {
-                    Text("Отмена")
+                    Text("Позже")
                 }
             }
         )
