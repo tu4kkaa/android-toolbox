@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 
 class MainActivity : ComponentActivity() {
@@ -67,7 +68,7 @@ fun ToolboxApp() {
     var showRatingDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        // permissions
+        // permissions (unchanged)
         val needed = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -90,34 +91,55 @@ fun ToolboxApp() {
         }
     }
 
-    // Session tracking
+    // ---- Session & tab tracking: separate timers ----
+    // appSessionStart: start of app session (resume -> pause)
+    val appSessionStart = remember { AtomicLong(System.currentTimeMillis()) }
+    // tabStart: start of current tab visit (enter tab -> leave tab)
+    val tabStart = remember { AtomicLong(System.currentTimeMillis()) }
     val lastTab = remember { mutableStateOf(current) }
-    val sessionStart = remember { AtomicLong(System.currentTimeMillis()) }
 
-    // handle tab switching: save previous session duration
+    // Minimum duration (ms) to record a tab visit — filters noisy very-short events (initial composition)
+    val MIN_TAB_RECORD_MS = 200L
+
+    // handle tab switching: save previous tab duration only (do NOT call addSession here)
     LaunchedEffect(current) {
         val now = System.currentTimeMillis()
-        val start = sessionStart.getAndSet(now)
-        val duration = (now - start).coerceAtLeast(0L)
-        // update telemetry (non-suspending)
-        telemetryManager.addSession(duration)
-        telemetryManager.addTabTime(lastTab.value, duration)
+        val prevTabStart = tabStart.getAndSet(now)
+        val duration = (now - prevTabStart).coerceAtLeast(0L)
+        // record tab time only if above threshold
+        if (duration >= MIN_TAB_RECORD_MS) {
+            telemetryManager.addTabTime(lastTab.value, duration)
+        }
         lastTab.value = current
     }
 
-    // lifecycle observer: save session on app pause/stop
-    val lifecycleOwner = androidx.compose.runtime.rememberUpdatedState(LocalContext.current)
-    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    // lifecycle observer: save app session on pause/stop and also save current tab time
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                val now = System.currentTimeMillis()
-                val start = sessionStart.getAndSet(now)
-                val duration = (now - start).coerceAtLeast(0L)
-                telemetryManager.addSession(duration)
-                telemetryManager.addTabTime(lastTab.value, duration)
-            } else if (event == Lifecycle.Event.ON_RESUME) {
-                sessionStart.set(System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    // 1) app session duration (resume -> pause)
+                    val appStart = appSessionStart.getAndSet(now)
+                    val appDuration = (now - appStart).coerceAtLeast(0L)
+                    if (appDuration > 0L) {
+                        telemetryManager.addSession(appDuration)
+                    }
+
+                    // 2) current tab duration (record and reset tabStart)
+                    val prevTabStart = tabStart.getAndSet(now)
+                    val tabDuration = (now - prevTabStart).coerceAtLeast(0L)
+                    if (tabDuration >= MIN_TAB_RECORD_MS) {
+                        telemetryManager.addTabTime(lastTab.value, tabDuration)
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // restart both timers
+                    appSessionStart.set(System.currentTimeMillis())
+                    tabStart.set(System.currentTimeMillis())
+                }
+                else -> { /* no-op */ }
             }
         }
         lifecycle.addObserver(observer)
@@ -126,6 +148,7 @@ fun ToolboxApp() {
         }
     }
 
+    // UI scaffold (unchanged)
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -153,9 +176,8 @@ fun ToolboxApp() {
         }
     }
 
-    // Rating dialog (global; appears when either auto or user requested)
+    // Rating dialog (global; unchanged)
     if (showRatingDialog) {
-        // simple rating dialog (1..5)
         var rating by remember { mutableStateOf(5) }
         AlertDialog(
             onDismissRequest = { showRatingDialog = false },
@@ -192,6 +214,7 @@ fun ToolboxApp() {
         )
     }
 }
+
 
 enum class AppDestinations(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     LEVEL("Level", Icons.Default.Straighten),

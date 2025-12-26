@@ -238,9 +238,10 @@ private fun AboutMeContent(
         }
         item {
             Spacer(Modifier.height(8.dp))
-            Text("Среднее время за сессию по вкладкам (приблизительно):", style = MaterialTheme.typography.titleMedium)
+            Text("Общее суммарное время по вкладкам:", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(4.dp))
-            telemetryState.averagePerTabMs.forEach { (k, v) ->
+            // показываем суммарное время, а не среднее
+            telemetryState.totalPerTabMs.forEach { (k, v) ->
                 Text("• $k: ${formatMs(v)}", style = MaterialTheme.typography.bodyMedium)
             }
         }
@@ -261,6 +262,7 @@ private fun AboutMeContent(
         }
     }
 }
+
 
 private fun formatMs(ms: Long): String {
     val seconds = TimeUnit.MILLISECONDS.toSeconds(ms) % 60
