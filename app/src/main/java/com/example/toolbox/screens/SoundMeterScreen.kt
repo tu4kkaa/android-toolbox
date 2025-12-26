@@ -10,22 +10,26 @@ import android.media.MediaRecorder
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Text
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.toolbox.DataStoreManager
 import kotlinx.coroutines.Dispatchers
@@ -57,85 +61,129 @@ fun SoundMeterScreen(modifier: Modifier = Modifier) {
     }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(RequestPermission()) { granted ->
-        // nothing special here
+        // nothing special here - the start logic will re-check permission
     }
 
-    Column(modifier = modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Sound Meter", fontWeight = FontWeight.Bold)
+    // helpers to start/stop audio
+    val startAudio: () -> Unit = {
+        if (audioJob == null) {
+            isRunning = true
+            audioJob = coroutine.launch {
+                try {
+                    runAudioLoop(onLevel = {
+                        dbVal = it + calibOffset
+                        history.add(dbVal)
+                        if (dbVal > peak) peak = dbVal
+                        if (history.size > 200) history.removeAt(0)
+                    })
+                } catch (e: Exception) {
+                    Log.e("SoundMeter", "Audio loop error: ${e.message}", e)
+                } finally {
+                    isRunning = false
+                    audioJob = null
+                }
+            }
+        }
+    }
+
+    val stopAudio: () -> Unit = {
+        audioJob?.cancel()
+        audioJob = null
+        isRunning = false
+    }
+
+    Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
+        Text("Sound Meter", fontWeight = FontWeight.Bold, fontSize = 20.sp)
         Spacer(Modifier.height(12.dp))
 
-        Card(modifier = Modifier
-            .height(180.dp)
-            .fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
-            Box(contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
+        // Card now contains only the visual canvas to maximize available vertical space
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp), // increased height to make the level indicator visually tall
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            // Canvas fills the whole card area (no extra space for texts inside the card)
+            Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                Canvas(modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))) {
                     val w = size.width
                     val h = size.height
-                    // draw simple bar based on dbVal
-                    val perc = ((dbVal + 100) / 100).coerceIn(0.0, 1.0)
-                    drawRect(color = Color.LightGray, size = size)
+
+                    // bounds: -100 dB .. +40 dB
+                    val minDb = -100.0
+                    val maxDb = 40.0
+
+                    val perc = ((dbVal - minDb) / (maxDb - minDb)).coerceIn(0.0, 1.0)
+
+                    // background
+                    drawRect(color = Color(0xFFF5F5F5), size = size)
+
+                    // level color
                     val color = when {
                         dbVal < 60 -> Color(0xFF4CAF50)
                         dbVal < 85 -> Color(0xFFFFC107)
                         else -> Color(0xFFF44336)
                     }
+
+                    // filled rect from bottom up according to perc
                     drawRect(
                         color = color,
                         topLeft = androidx.compose.ui.geometry.Offset(0f, h * (1f - perc.toFloat())),
                         size = androidx.compose.ui.geometry.Size(w, h * perc.toFloat())
                     )
+
+                    // 0 dB dashed line
+                    val zeroPerc = ((0.0 - minDb) / (maxDb - minDb)).coerceIn(0.0, 1.0)
+                    val yZero = h * (1f - zeroPerc.toFloat())
+                    drawLine(
+                        color = Color.Black,
+                        start = androidx.compose.ui.geometry.Offset(0f, yZero),
+                        end = androidx.compose.ui.geometry.Offset(w, yZero),
+                        strokeWidth = 2f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+                    )
+
+                    // border
                     drawRect(color = Color.Black, size = size, style = Stroke(width = 2f))
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
-        Text("Level: ${"%.1f".format(dbVal)} dB", fontWeight = FontWeight.SemiBold)
-        Text("Peak: ${"%.1f".format(peak)} dB")
+        Spacer(Modifier.height(8.dp))
 
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = {
-                // Check permission
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    return@Button
-                }
-                if (audioJob == null) {
-                    // start audio measurement in a coroutine job so we can cancel it reliably
-                    isRunning = true
-                    audioJob = coroutine.launch {
-                        try {
-                            runAudioLoop(onLevel = {
-                                // update UI from coroutine
-                                dbVal = it + calibOffset
-                                history.add(dbVal)
-                                if (dbVal > peak) peak = dbVal
-                                if (history.size > 200) history.removeAt(0)
-                            })
-                        } catch (e: Exception) {
-                            Log.e("SoundMeter", "Audio loop error: ${e.message}", e)
-                        } finally {
-                            isRunning = false
-                            audioJob = null
-                        }
-                    }
-                }
-            }) {
-                Text(if (isRunning) "Running..." else "Start")
+        // Level and Peak moved outside the card so canvas uses maximum vertical space
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("Level", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("${"%.1f".format(dbVal)} dB", fontWeight = FontWeight.Bold, fontSize = 32.sp)
             }
 
-            Button(onClick = {
-                // stop measurement by cancelling job
-                audioJob?.cancel()
-                audioJob = null
-                isRunning = false
-            }) {
-                Text("Stop")
+            Column(horizontalAlignment = Alignment.End) {
+                Text("Peak", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("${"%.1f".format(peak)} dB", fontWeight = FontWeight.Bold, fontSize = 28.sp)
             }
+        }
 
+        Spacer(Modifier.height(12.dp))
+
+        // Session peaks summary
+        if (history.isNotEmpty()) {
+            Text("Session Peaks: ${history.maxOrNull()?.let { "%.1f".format(it) } ?: "--"} dB")
+        }
+
+        Spacer(Modifier.weight(1f)) // push controls to bottom
+
+        // Bottom control bar
+        Row(modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically) {
+
+            // Calibrate (left)
             Button(onClick = {
-                // calibrate reference so current reading becomes zero-offset
                 coroutine.launch {
                     try {
                         ds.saveSoundCalib(-dbVal)
@@ -144,14 +192,56 @@ fun SoundMeterScreen(modifier: Modifier = Modifier) {
                         Log.w("SoundMeter", "Calibration save failed: ${e.message}")
                     }
                 }
-            }, colors = ButtonDefaults.buttonColors()) {
+            }) {
                 Text("Calibrate")
             }
-        }
 
-        Spacer(Modifier.height(12.dp))
-        if (history.isNotEmpty()) {
-            Text("Session Peaks: ${history.maxOrNull()?.let { "%.1f".format(it) } ?: "--"} dB")
+            // Start/Stop circular toggle (center) with microphone icon
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                // permission not granted: show disabled-looking outline and launch permission when tapped
+                OutlinedButton(
+                    onClick = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                    shape = CircleShape,
+                    modifier = Modifier.size(72.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(Icons.Default.Mic, contentDescription = "Request mic", modifier = Modifier.size(32.dp))
+                }
+            } else {
+                if (isRunning) {
+                    // running: full circular primary button
+                    Button(
+                        onClick = { stopAudio() },
+                        shape = CircleShape,
+                        modifier = Modifier.size(72.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "Stop", modifier = Modifier.size(32.dp), tint = Color.White)
+                    }
+                } else {
+                    // stopped: transparent/outlined circular button
+                    OutlinedButton(
+                        onClick = {
+                            // before starting, re-check permission
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            } else {
+                                startAudio()
+                            }
+                        },
+                        shape = CircleShape,
+                        modifier = Modifier.size(72.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Default.Mic, contentDescription = "Start", modifier = Modifier.size(32.dp))
+                    }
+                }
+            }
+
+            // A placeholder for future action on the right (keeps center button balanced)
+            Spacer(modifier = Modifier.width(72.dp))
         }
     }
 }
