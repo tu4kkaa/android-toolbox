@@ -1,0 +1,46 @@
+@startuml
+title Toolbox Android App Architecture (Simplified)
+
+skinparam componentStyle rectangle
+
+package "UI Layer" {
+  component MainActivity
+  component LevelScreen
+  component SoundMeterScreen
+  component FlashlightScreen
+  component OtherScreen
+}
+
+package "Data Layer" {
+  component DataStoreManager
+  component TelemetryManager
+  database SharedPreferences
+}
+
+package "Hardware / Services" {
+  component SensorManager
+  component CameraManager
+  component AudioRecord
+}
+
+' Navigation
+MainActivity --> LevelScreen
+MainActivity --> SoundMeterScreen
+MainActivity --> FlashlightScreen
+MainActivity --> OtherScreen
+
+' Data flows
+LevelScreen --> DataStoreManager
+LevelScreen --> SensorManager
+
+SoundMeterScreen --> DataStoreManager
+SoundMeterScreen --> AudioRecord
+
+FlashlightScreen --> CameraManager
+
+OtherScreen --> TelemetryManager
+TelemetryManager --> SharedPreferences
+
+MainActivity --> TelemetryManager
+
+@enduml
