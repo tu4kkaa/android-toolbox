@@ -184,7 +184,7 @@ fun ToolboxApp() {
             title = { Text("Оцените приложение") },
             text = {
                 Column {
-                    Text("Спасибо! Пожалуйста, поставьте оценку (1–5):")
+                    Text("Выберите оценку (1–5):")
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         for (i in 1..5) {

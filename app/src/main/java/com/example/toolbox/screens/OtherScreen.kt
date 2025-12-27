@@ -193,7 +193,7 @@ fun OtherScreen(
             title = { Text("Оцените приложение") },
             text = {
                 Column {
-                    Text("Выберите рейтинг (1–5):")
+                    Text("Выберите оценку (1–5):")
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.SpaceBetween) {
                         for (i in 1..5) {
